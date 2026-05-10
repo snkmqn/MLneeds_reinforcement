@@ -1,14 +1,34 @@
-from fastapi import FastAPI
-from pydantic import BaseModel, Field
+import logging
 from typing import Optional
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+
 from prediction import NeedsReinforcementPredictor
 
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+
+logger = logging.getLogger("needs_reinforcement_ml")
+
 app = FastAPI(title="Needs Reinforcement ML Service")
 
-predictor = NeedsReinforcementPredictor(
-    model_path="model/needs_reinforcement.pkl"
-)
+try:
+    predictor = NeedsReinforcementPredictor(
+        model_path="model/needs_reinforcement.pkl"
+    )
+    logger.info(
+        "Model loaded successfully: model=%s threshold=%.4f features_count=%d",
+        predictor.model_name,
+        float(predictor.threshold),
+        len(predictor.all_features),
+    )
+except Exception:
+    logger.exception("Failed to load needs reinforcement model")
+    raise
 
 
 class ReinforcementRequest(BaseModel):
@@ -30,6 +50,8 @@ class ReinforcementRequest(BaseModel):
 
 @app.get("/health")
 def health():
+    logger.info("Health check requested")
+
     return {
         "status": "ok",
         "model": predictor.model_name,
@@ -42,25 +64,30 @@ def health():
 def predict_reinforcement(request: ReinforcementRequest):
     data = request.model_dump()
 
-    if data.get("subtopic_code") is None or data.get("subtopic_code") == "":
-        data["subtopic_code"] = "topic_final"
+    logger.info(
+        "Prediction request received: quiz_type=%s topic=%s subtopic=%s quiz_score=%.2f avg_last_3=%s previous_fails=%s",
+        data.get("quiz_type"),
+        data.get("topic_code"),
+        data.get("subtopic_code"),
+        data.get("quiz_score"),
+        data.get("avg_last_3_scores"),
+        data.get("previous_fails_same_topic"),
+    )
 
-    if data.get("avg_last_3_scores") is None:
-        data["avg_last_3_scores"] = data["quiz_score"]
+    try:
+        result = predictor.predict_single(data)
+    except Exception as exc:
+        logger.exception("Prediction failed")
+        raise HTTPException(status_code=500, detail="PREDICTION_FAILED") from exc
 
-    if data.get("previous_fails_same_topic") is None:
-        data["previous_fails_same_topic"] = 0
-
-    if data.get("subtopic_order") is None:
-        data["subtopic_order"] = 1
-
-    if data.get("preferred_topic_match") is None:
-        data["preferred_topic_match"] = 0
-
-    if data.get("completed_interactive") is None:
-        data["completed_interactive"] = 1
-
-    result = predictor.predict_single(data)
+    logger.info(
+        "Prediction response: needs_reinforcement=%s prediction=%s probability=%.4f confidence=%.4f model=%s",
+        result["needs_reinforcement"],
+        result["prediction"],
+        float(result["probability"]),
+        float(result["confidence"]),
+        result.get("model_name"),
+    )
 
     return {
         "needs_reinforcement": result["needs_reinforcement"],

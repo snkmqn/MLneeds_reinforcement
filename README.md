@@ -135,15 +135,3 @@ data/needs_reinforcement_synthetic_20000_v2.csv
 ```
 
 Real user personal data is not stored in this repository.
-
-## Do Not Commit
-
-The following files and folders should not be pushed to GitHub:
-
-```text
-.venv/
-.env
-.idea/
-__pycache__/
-*.log
-```
